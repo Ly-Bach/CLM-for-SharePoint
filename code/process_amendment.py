@@ -185,19 +185,22 @@ def _build_metadata_diff(contract: Contract, contract_changes: Dict[str, Any],
         diff[alias] = {"old": old_str, "new": new_val}
     return diff
 
-
 def _write_run(out_base: str, run_id: uuid.UUID, contract_id: str, types: list,
                confidences: dict, succeeded: bool, error: Optional[str] = None) -> None:
+    "Write the AIExtractionRun audit record for an amendment run."
     run = AIExtractionRun(
-        RunID=run_id, ContractID=contract_id,
-        Timestamp=datetime.now(timezone.utc), ModelVersion=MODEL_VERSION,
-        ExtractionType=types, ConfidenceScores=confidences, Succeeded=succeeded,
+        RunID=run_id,
+        ContractID=contract_id,
+        Timestamp=datetime.now(timezone.utc),
+        ModelVersion=MODEL_VERSION,
+        ExtractionTypes=types,            # was: ExtractionType=types
+        ConfidenceScores=confidences,
+        Succeeded=succeeded,
     )
     payload = run.model_dump(by_alias=True)
     if error:
         payload["Error"] = error
     sp.upload_json(f"{out_base}/Metadata/ai_run_{run_id}.json", payload)
-
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Process one amendment through the CLM pipeline.")

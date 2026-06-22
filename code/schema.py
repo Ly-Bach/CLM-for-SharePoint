@@ -187,16 +187,26 @@ class ExtractionType(str, Enum):
 
 
 class AIExtractionRun(CLMBase):
+    "Per-run audit record. One row per orchestrator invocation, success or fail."
+    model_config = {"extra": "forbid", "use_enum_values": True,
+                    "validate_default": True, "validate_assignment": True}
+
     run_id: UUID = Field(alias="RunID")
     contract_id: UUID = Field(alias="ContractID")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), alias="Timestamp")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        alias="Timestamp",
+    )
     model_version: str = Field(alias="ModelVersion")
-    extraction_types: list[ExtractionType] = Field(default_factory=list, alias="ExtractionType")
+    # Renamed alias: "ExtractionType" (singular) -> "ExtractionTypes" (plural).
+    # Field name was already plural; this just aligns the serialized key.
+    extraction_types: list[ExtractionType] = Field(
+        default_factory=list, alias="ExtractionTypes"
+    )
     output_url: Optional[str] = Field(default=None, alias="OutputURL")
     confidence_scores: dict[str, float] = Field(default_factory=dict, alias="ConfidenceScores")
     error_log_url: Optional[str] = Field(default=None, alias="ErrorLogURL")
     succeeded: bool = Field(default=True, alias="Succeeded")
-
 
 # --------------------------------------------------------------------------- #
 # Requirement atoms (for clause comparison views)

@@ -1,56 +1,59 @@
-# CLM SharePoint List — Column Reference (v2)
+## CLM SharePoint List - Column Reference (v2)
 
-The query layer behind all analytics. `provision_lists.py` creates these
+The query layer behind all analytics. provision_lists.py creates these
 idempotently. Power BI and Power Automate read these typed columns directly;
 the orchestrator upserts rows keyed by the **Key** column. Only rows with
-`ReviewStatus = Approved` should feed dashboards and comparisons.
+ReviewStatus = Approved should feed dashboards and comparisons. Rows where
+PriorityReview = True should be triaged before other Pending rows.
 
-## Contract Index — one row per contract
+### Contract Index - one row per contract
 
 | Column | Type | Notes |
 |---|---|---|
 | ContractID | Text | **Key**. GUID minted by the orchestrator |
 | Title | Text | Human-readable name (lives here, not in the folder path) |
-| Counterparty | Text | |
+| Counterparty | Text |  |
 | ContractType | Choice | Grant, Vendor, Subrecipient, MOU, Lease, Other |
 | Status | Choice | Draft, Active, Expired, Terminated |
-| EffectiveDate | Date | |
+| EffectiveDate | Date |  |
 | ExpirationDate | Date | Drives renewal/expiry dashboards |
-| CurrentValue | Number | Computed: TotalValue + Σ amendment ValueChanges |
+| CurrentValue | Number | Computed: TotalValue + sum of amendment ValueChanges |
 | FundingSource | Choice | Federal, State, Local, Private |
-| ReviewStatus | Choice | Pending → Reviewed → Approved |
+| ReviewStatus | Choice | Pending -> Reviewed -> Approved |
+| PriorityReview | Boolean | True when any extraction confidence is below threshold; surfaces priority-review items |
 
-## Amendment Index — one row per amendment
+### Amendment Index - one row per amendment
 
 | Column | Type | Notes |
 |---|---|---|
 | AmendmentID | Text | **Key**. GUID minted by the orchestrator |
-| ContractID | Text | Foreign key → Contract Index |
-| AmendmentNumber | Number (0 dp) | |
+| ContractID | Text | Foreign key -> Contract Index |
+| AmendmentNumber | Number (0 dp) |  |
 | AmendmentType | Choice | Extension, Budget Revision, Scope Change, Legal Correction, Other |
-| EffectiveDate | Date | |
-| ValueChange | Number | +/–; rolls up into Contract CurrentValue |
-| ReviewStatus | Choice | Pending → Reviewed → Approved |
+| EffectiveDate | Date |  |
+| ValueChange | Number | +/-; rolls up into Contract CurrentValue |
+| ReviewStatus | Choice | Pending -> Reviewed -> Approved |
 
-## Clause Map Index — one row per clause↔term mapping
+### Clause Map Index - one row per clause<->term mapping
 
 | Column | Type | Notes |
 |---|---|---|
 | MapID | Text | **Key**. GUID minted by the orchestrator |
-| ContractID | Text | Foreign key → Contract Index |
+| ContractID | Text | Foreign key -> Contract Index |
 | ClauseID | Text | Standard clause taxonomy ID |
 | TermID | Text | Subject-matter taxonomy ID |
-| RelevanceScore | Number | 0.0–1.0 |
-| ExtractionConfidence | Number | 0.0–1.0; below threshold → priority review |
-| ReviewStatus | Choice | Pending → Reviewed → Approved |
+| RelevanceScore | Number | 0.0 to 1.0 |
+| ExtractionConfidence | Number | 0.0 to 1.0; below threshold -> PriorityReview = True |
+| ReviewStatus | Choice | Pending -> Reviewed -> Approved |
+| PriorityReview | Boolean | True when ExtractionConfidence is below threshold |
 
-## Notes
+### Notes
 
 - **Choice columns** give clean filters/slicers in Power BI without lookups.
 - **ContractID as foreign key** lets Power BI relate the three Lists for
   cross-contract clause-coverage heatmaps and UpSet plots.
-- For datasets beyond a few thousand rows, **index the key + ReviewStatus
-  columns** in List settings so filtered queries stay fast.
-- The `StandardClause` and `SubjectMatterTerm` taxonomies are seed/reference
-  data — keep them as JSON/CSV (or their own Lists later); the Clause Map Index
-  is what gets queried per contract.
+- For datasets beyond a few thousand rows, **index the key + ReviewStatus +
+  PriorityReview columns** in List settings so filtered queries stay fast.
+- The StandardClause and SubjectMatterTerm taxonomies are seed/reference data;
+  keep them as JSON/CSV (or their own Lists later). The Clause Map Index is
+  what gets queried per contract.

@@ -1,15 +1,12 @@
 """
 provision_lists.py (v2)
 
-Creates the three SharePoint Lists that form the CLM query layer:
-
-    * Contract Index      — one row per contract
-    * Amendment Index     — one row per amendment
-    * Clause Map Index    — one row per clause<->subject-matter mapping
+Creates the three SharePoint Lists that form the CLM query layer.
 
 Columns are typed (text / number / choice / dateTime / boolean) so Power BI and
-Power Automate see real types, and the key + ReviewStatus columns are what the
-orchestrator upserts against. Idempotent: existing lists/columns are skipped.
+Power Automate see real types, and the key + ReviewStatus + PriorityReview
+columns are what the orchestrator upserts against. Idempotent: existing lists
+and columns are skipped.
 
 Run once after the Azure AD app has Sites.Selected on the Contracts site:
 
@@ -30,28 +27,32 @@ SITE = f"{GRAPH}/sites/{settings.site_id}"
 REVIEW_CHOICES = ["Pending", "Reviewed", "Approved"]
 
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # Column-definition helpers (Graph columnDefinition shapes)
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 def text(name: str) -> Dict[str, Any]:
     return {"name": name, "text": {}}
+
 
 def number(name: str, decimals: int = 2) -> Dict[str, Any]:
     return {"name": name, "number": {"decimalPlaces": str(decimals)}}
 
+
 def boolean(name: str) -> Dict[str, Any]:
     return {"name": name, "boolean": {}}
 
+
 def datetime_col(name: str) -> Dict[str, Any]:
     return {"name": name, "dateTime": {"format": "dateOnly"}}
+
 
 def choice(name: str, choices: List[str]) -> Dict[str, Any]:
     return {"name": name, "choice": {"choices": choices, "displayAs": "dropDownMenu"}}
 
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # List definitions
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 LISTS: Dict[str, List[Dict[str, Any]]] = {
     "Contract Index": [
         text("ContractID"),          # key
@@ -64,13 +65,14 @@ LISTS: Dict[str, List[Dict[str, Any]]] = {
         number("CurrentValue"),
         choice("FundingSource", ["Federal", "State", "Local", "Private"]),
         choice("ReviewStatus", REVIEW_CHOICES),
+        boolean("PriorityReview"),   # True when any confidence < threshold
     ],
     "Amendment Index": [
         text("AmendmentID"),         # key
         text("ContractID"),          # foreign key
         number("AmendmentNumber", decimals=0),
-        choice("AmendmentType",
-               ["Extension", "Budget Revision", "Scope Change", "Legal Correction", "Other"]),
+        choice("AmendmentType", [
+            "Extension", "Budget Revision", "Scope Change", "Legal Correction", "Other"]),
         datetime_col("EffectiveDate"),
         number("ValueChange"),
         choice("ReviewStatus", REVIEW_CHOICES),
@@ -83,6 +85,7 @@ LISTS: Dict[str, List[Dict[str, Any]]] = {
         number("RelevanceScore"),
         number("ExtractionConfidence"),
         choice("ReviewStatus", REVIEW_CHOICES),
+        boolean("PriorityReview"),   # True when ExtractionConfidence < threshold
     ],
 }
 
@@ -90,17 +93,33 @@ LISTS: Dict[str, List[Dict[str, Any]]] = {
 def _headers() -> Dict[str, str]:
     return {"Authorization": f"Bearer {get_access_token()}", "Content-Type": "application/json"}
 
+
 def _existing_lists() -> Dict[str, str]:
     r = requests.get(f"{SITE}/lists?$select=id,displayName", headers=_headers(), timeout=60)
     r.raise_for_status()
     return {x["displayName"]: x["id"] for x in r.json().get("value", [])}
 
-def _existing_columns(list_id: str) -> set[str]:
-    r = requests.get(f"{SITE}/lists/{list_id}/columns?$select=name", headers=_headers(), timeout=60)
+
+def _existing_columns(list_id: str) -> set:
+    r = requests.get(f"{SITE}/lists/{list_id}/columns?$select=name",
+                     headers=_headers(), timeout=60)
     r.raise_for_status()
     return {c["name"] for c in r.json().get("value", [])}
 
+
+def _add_column(list_id: str, col_def: Dict[str, Any]) -> None:
+    "POST one columnDefinition. Caller is expected to skip duplicates."
+    r = requests.post(f"{SITE}/lists/{list_id}/columns",
+                      headers=_headers(), json=col_def, timeout=60)
+    r.raise_for_status()
+    print(f"  + column added: {col_def['name']}")
+
+
 def ensure_list(display_name: str, columns: List[Dict[str, Any]]) -> None:
+    """
+    Idempotently ensure a list exists with all the requested columns.
+    Safe to re-run: existing lists are reused and existing columns are skipped.
+    """
     existing = _existing_lists()
     if display_name in existing:
         list_id = existing[display_name]
@@ -112,14 +131,13 @@ def ensure_list(display_name: str, columns: List[Dict[str, Any]]) -> None:
         list_id = r.json()["id"]
         print(f"+ created list: {display_name}")
 
+    # Fold in the column-creation loop (this was missing in v2.0).
     have = _existing_columns(list_id)
     for col in columns:
         if col["name"] in have:
+            print(f"  = column exists: {col['name']}")
             continue
-        r = requests.post(f"{SITE}/lists/{list_id}/columns",
-                          headers=_headers(), json=col, timeout=60)
-        r.raise_for_status()
-        print(f"    + column: {col['name']}")
+        _add_column(list_id, col)
 
 
 def main() -> None:
