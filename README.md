@@ -85,7 +85,15 @@ AZURE_OPENAI_API_VERSION=2024-10-21
 AZURE_OPENAI_DEPLOYMENT_EXTRACT=gpt-4.1
 AZURE_OPENAI_DEPLOYMENT_JUDGE=o4-mini
 # AZURE_OPENAI_API_KEY=... # local-dev fallback; prefer Entra ID
+
+# Backend selector: true = offline ai_dummy (no API calls), false = real Azure.
+USE_DUMMY_AI=false
 ```
+
+Set `USE_DUMMY_AI=true` to run the pipeline against the offline placeholder
+backend (no Azure deployment required) while still exercising the SharePoint and
+schema-validation wiring. The orchestrators import `ai_provider`, which selects
+`ai_dummy` or `ai_extract` from this single flag — no code edits needed to swap.
 
 The Azure AD app should be granted `Sites.Selected` on the Contracts site only
 (not tenant-wide `Sites.ReadWrite.All`).

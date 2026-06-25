@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # Prefer Entra ID (managed identity / app token). Key is a local-dev fallback.
     azure_openai_api_key: Optional[str] = Field(default=None, alias="AZURE_OPENAI_API_KEY")
 
+    # When true the pipeline uses the offline ai_dummy backend (no API calls) so
+    # the SharePoint + schema wiring can be exercised without a live Azure
+    # deployment. Defaults to the real Azure OpenAI backend.
+    use_dummy_ai: bool = Field(default=False, alias="USE_DUMMY_AI")
+
     def validate_auth(self) -> None:
         if not ((self.cert_path and self.cert_thumbprint) or self.client_secret):
             raise RuntimeError(

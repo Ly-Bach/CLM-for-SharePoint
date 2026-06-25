@@ -98,18 +98,22 @@ def _get_client():
 # Calls
 # --------------------------------------------------------------------------- #
 def _call(model: Type[T], system: str, user: str, deployment: str,
-          temperature: float = 0.0) -> T:
+          temperature: Optional[float] = 0.0) -> T:
     client = _get_client()
     response_format = {
         "type": "json_schema",
         "json_schema": {"name": model.__name__, "schema": to_strict_schema(model), "strict": True},
     }
-    resp = client.chat.completions.create(
-        model=deployment,
-        temperature=temperature,
-        response_format=response_format,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-    )
+    kwargs: Dict[str, Any] = {
+        "model": deployment,
+        "response_format": response_format,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    # Reasoning deployments (o-series) reject the temperature parameter — only the
+    # default is allowed — so pass temperature=None to omit it entirely.
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    resp = client.chat.completions.create(**kwargs)
     choice = resp.choices[0].message
     if getattr(choice, "refusal", None):
         raise RuntimeError(f"Model refused: {choice.refusal}")
@@ -122,8 +126,11 @@ def extract(model: Type[T], system: str, user: str) -> T:
 
 
 def judge(model: Type[T], system: str, user: str) -> T:
-    """Harder judgment (e.g. clause-pair diff) on the reasoning deployment."""
-    return _call(model, system, user, settings.azure_openai_deployment_judge, temperature=0.0)
+    """Harder judgment (e.g. clause-pair diff) on the reasoning deployment.
+
+    Temperature is omitted: o-series reasoning models only support the default.
+    """
+    return _call(model, system, user, settings.azure_openai_deployment_judge, temperature=None)
 
 
 def which_models() -> Dict[str, Optional[str]]:

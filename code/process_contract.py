@@ -31,8 +31,9 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-import ai_extract as ai
+import ai_provider as ai
 import sharepoint_io as sp
+from ai_provider import MODEL_VERSION
 from text_extract import extract_text
 from schema import (
     AIExtractionRun,
@@ -43,7 +44,6 @@ from schema import (
 )
 
 CONFIDENCE_THRESHOLD = 0.85  # below this -> flagged for priority human review
-MODEL_VERSION = "dummy-v0"
 
 CONTRACT_INDEX_LIST = "Contract Index"
 CLAUSE_MAP_LIST = "Clause Map Index"

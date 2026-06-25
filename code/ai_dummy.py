@@ -34,17 +34,24 @@ def extract_metadata(text: str) -> Dict[str, Any]:
 
 
 def extract_clauses(text: str) -> Dict[str, Any]:
+    # Shapes match ai_extract.extract_clauses (clause_id / clause_name / text_span)
+    # so the two backends are truly interchangeable.
     return {
         "clauses": [
-            {"ClauseID": "TERM", "ClauseName": "Termination", "Text": "…dummy termination text…"},
-            {"ClauseID": "SOW", "ClauseName": "Scope of Work", "Text": "…dummy scope text…"},
+            {"clause_id": "TERM", "clause_name": "Termination", "text_span": "…dummy termination text…"},
+            {"clause_id": "SOW", "clause_name": "Scope of Work", "text_span": "…dummy scope text…"},
         ],
         "confidence": 0.84,
     }
 
 
-def map_subject_terms(text: str, clauses: Dict[str, Any]) -> Dict[str, Any]:
-    """Dual-taxonomy mappings — clause -> subject-matter term."""
+def map_subject_terms(text: str, clauses: Dict[str, Any],
+                      candidate_terms: Any = None) -> Dict[str, Any]:
+    """Dual-taxonomy mappings — clause -> subject-matter term.
+
+    Accepts candidate_terms for signature parity with ai_extract; the dummy
+    backend ignores it.
+    """
     return {
         "mappings": [
             {"ClauseID": "TERM", "TermID": "PROGRAM_EXIT",
