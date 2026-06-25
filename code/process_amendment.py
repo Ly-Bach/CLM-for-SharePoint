@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -43,6 +44,8 @@ from schema import (
     ExtractionType,
     ReviewStatus,
 )
+
+log = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.85
 CONTRACT_INDEX_LIST = "Contract Index"
@@ -89,18 +92,38 @@ def process_amendment(contract_id: str, amendment_number: int, filename: str) ->
     extraction_types: list[ExtractionType] = []
     confidences: Dict[str, float] = {}
 
+    # 1. Load the approved original + extract amendment text.
     try:
         contract = _load_contract(contract_id)
         original_clauses = _load_clause_set(contract_id)
 
         raw = sp.download_file(f"{amd_folder}/{filename}")
         text = extract_text(filename, raw)
+        if not text or not text.strip():
+            raise RuntimeError(
+                f"Empty text after extraction for {filename}. "
+                "Check that the file is not a blank scan and that OCR is installed."
+            )
+    except Exception as exc:
+        _write_run(out, run_id, contract_id, extraction_types, confidences,
+                   succeeded=False, error=f"load_or_text_extract: {exc}")
+        log.exception("Load/text extraction failed for amendment on %s", contract_id)
+        raise
 
+    # 2. AI extraction, attributes only.
+    try:
         meta = ai.extract_amendment_metadata(text)
         diff = ai.detect_modified_clauses(text, original_clauses)
         confidences = {"AmendmentMetadata": meta["confidence"], "ClauseDiff": diff["confidence"]}
         extraction_types = [ExtractionType.METADATA, ExtractionType.CLAUSES]
+    except Exception as exc:
+        _write_run(out, run_id, contract_id, extraction_types, confidences,
+                   succeeded=False, error=f"ai_extract: {exc}")
+        log.exception("AI extraction failed for amendment on %s", contract_id)
+        raise
 
+    # 3. Validate + roll the value up. On failure, nothing downstream is written.
+    try:
         amendment = Amendment(
             AmendmentID=amendment_id,
             ContractID=contract_id,
@@ -119,11 +142,10 @@ def process_amendment(contract_id: str, amendment_number: int, filename: str) ->
         metadata_diff = _build_metadata_diff(contract, contract_changes, before_value)
         for field_alias, new_val in contract_changes.items():
             _apply_contract_change(contract, field_alias, new_val)
-
-    except (ValidationError, RuntimeError, Exception) as exc:  # noqa: BLE001
+    except ValidationError as exc:
         _write_run(out, run_id, contract_id, extraction_types, confidences,
-                   succeeded=False, error=str(exc))
-        print(f"[FAILED] amendment for {contract_id}: {exc}", file=sys.stderr)
+                   succeeded=False, error=f"schema_validation: {exc.errors()}")
+        log.error("Validation failed for amendment on %s: %s", contract_id, exc)
         raise
 
     # Persist amendment + diff + updated contract
@@ -148,11 +170,14 @@ def process_amendment(contract_id: str, amendment_number: int, filename: str) ->
     sp.upsert_list_item(CONTRACT_INDEX_LIST, "ContractID", contract.index_row())
 
     _write_run(out, run_id, contract_id, extraction_types, confidences, succeeded=True)
-    low = {k: v for k, v in confidences.items() if v < CONFIDENCE_THRESHOLD}
-    flag = f"  ⚠ low-confidence (priority review): {low}" if low else ""
-    print(f"[OK] amendment {amendment_number} on {contract_id}: "
-          f"value {metadata_diff['CurrentValue']['old']} -> {metadata_diff['CurrentValue']['new']}, "
-          f"{len(diff['modified'])} clause(s) modified, review={ReviewStatus.PENDING.value}.{flag}")
+    priority_review = any(c < CONFIDENCE_THRESHOLD for c in confidences.values())
+    log.info(
+        "Processed amendment %s on %s: value %s -> %s, %d clause(s) modified "
+        "(review=%s, priority_review=%s)",
+        amendment_number, contract_id,
+        metadata_diff["CurrentValue"]["old"], metadata_diff["CurrentValue"]["new"],
+        len(diff["modified"]), ReviewStatus.PENDING.value, priority_review,
+    )
     return str(amendment_id)
 
 
@@ -203,13 +228,17 @@ def _write_run(out_base: str, run_id: uuid.UUID, contract_id: str, types: list,
     sp.upload_json(f"{out_base}/Metadata/ai_run_{run_id}.json", payload)
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description="Process one amendment through the CLM pipeline.")
     ap.add_argument("--contract-id", required=True, help="Existing ContractID.")
     ap.add_argument("--amendment-number", required=True, type=int)
     ap.add_argument("--filename", required=True,
                     help="File name inside 02_Amendments/Amendment_NN/.")
     args = ap.parse_args()
-    process_amendment(args.contract_id, args.amendment_number, args.filename)
+    try:
+        process_amendment(args.contract_id, args.amendment_number, args.filename)
+    except Exception:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
